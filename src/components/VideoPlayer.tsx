@@ -12,6 +12,8 @@ export default function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<any>(null);
+  const mpegtsRef = useRef<any>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
   const [volume, setVolume] = useState(1);
@@ -39,20 +41,28 @@ export default function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
+    if (mpegtsRef.current) {
+      mpegtsRef.current.destroy();
+      mpegtsRef.current = null;
+    }
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
 
     setPlaybackError("");
     setPlaying(false);
 
     const isM3u = url.includes(".m3u8") || url.includes(".m3u");
     const isTs = url.endsWith(".ts");
+    const isOtherHttp = url.startsWith("http") && !isM3u && !isTs;
 
-    console.log("[VideoPlayer] Loading:", url.substring(0, 80), { isM3u, isTs });
+    console.log("[VideoPlayer] Loading:", url.substring(0, 100), { isM3u, isTs, isOtherHttp });
 
-    const setupHls = (src: string) => {
+    const playWithHls = (src: string) => {
       import("hls.js").then((HlsModule) => {
         const Hls = HlsModule.default;
         if (!Hls.isSupported()) {
-          console.warn("[VideoPlayer] hls.js not supported, falling back to native");
           video.src = src;
           video.load();
           return;
@@ -68,51 +78,78 @@ export default function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
         hlsRef.current = hls;
 
         hls.on(Hls.Events.MANIFEST_PARSED, (_e: any, data: any) => {
-          console.log("[VideoPlayer] Manifest parsed, levels:", data.levels?.length);
-          video.play().then(() => setPlaying(true)).catch((e: any) => {
-            console.warn("[VideoPlayer] Autoplay blocked:", e.message);
-            setPlaying(false);
-          });
+          console.log("[VideoPlayer] HLS manifest parsed, levels:", data.levels?.length);
+          video.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
         });
 
         hls.on(Hls.Events.ERROR, (_event: any, data: any) => {
           console.error("[VideoPlayer] HLS error:", data.type, data.details, data.fatal);
           if (data.fatal) {
-            switch (data.type) {
-              case Hls.ErrorTypes.NETWORK_ERROR:
-                setPlaybackError("Network error — the stream server may be offline or blocking requests.");
-                hls.startLoad();
-                break;
-              case Hls.ErrorTypes.MEDIA_ERROR:
-                setPlaybackError("Playback error — the stream format may be unsupported.");
-                hls.recoverMediaError();
-                break;
-              default:
-                setPlaybackError("Failed to play this channel. The stream may be offline or unreachable.");
-                hls.destroy();
-                break;
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+              setPlaybackError("Network error - stream server may be offline or blocking requests.");
+              hls.startLoad();
+            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+              setPlaybackError("Playback error - stream format may be unsupported.");
+              hls.recoverMediaError();
+            } else {
+              setPlaybackError("Failed to play this channel. Stream may be offline.");
+              hls.destroy();
             }
           }
         });
       });
     };
 
-    if (isM3u || isTs) {
-      const hlsSrc = isTs ? `/api/manifest?url=${encodeURIComponent(url)}` : url;
-      if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        console.log("[VideoPlayer] Using native HLS");
-        video.src = hlsSrc;
+    const playViaProxy = (streamUrl: string) => {
+      const proxySrc = `/api/stream?url=${encodeURIComponent(streamUrl)}`;
+      console.log("[VideoPlayer] Using mpegts.js for:", streamUrl.substring(0, 80));
+
+      import("mpegts.js").then((mpegtsModule) => {
+        const mpegts = mpegtsModule.default;
+        if (mpegts.isSupported()) {
+          const player = mpegts.createPlayer({
+            type: "mpegts",
+            url: proxySrc,
+          }, {
+            liveBufferLatencyChasing: true,
+            liveBufferLatencyMaxLatency: 5,
+            liveBufferLatencyMinRemain: 2,
+          });
+          player.attachMediaElement(video);
+          player.load();
+          mpegtsRef.current = player;
+
+          player.on(mpegts.Events.ERROR, (errorType: string, errorDetail: string) => {
+            console.error("[VideoPlayer] mpegts.js error:", errorType, errorDetail);
+            setPlaybackError("Failed to play this channel. Stream may be offline.");
+          });
+
+          player.on(mpegts.Events.LOADING_COMPLETE, () => {
+            console.log("[VideoPlayer] Stream ended");
+            setPlaying(false);
+          });
+
+          video.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+        } else {
+          console.warn("[VideoPlayer] mpegts.js not supported, trying native");
+          video.src = proxySrc;
+          video.load();
+          video.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+        }
+      }).catch((err) => {
+        console.error("[VideoPlayer] Failed to load mpegts.js:", err);
+        video.src = proxySrc;
         video.load();
         video.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
-      } else {
-        console.log("[VideoPlayer] Using hls.js");
-        setupHls(hlsSrc);
-      }
+      });
+    };
+
+    if (isM3u) {
+      playWithHls(url);
+    } else if (isTs) {
+      playViaProxy(url);
     } else {
-      console.log("[VideoPlayer] Using native video");
-      video.src = url;
-      video.load();
-      video.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+      playWithHls(url);
     }
 
     showControls();
@@ -121,6 +158,14 @@ export default function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
+      }
+      if (mpegtsRef.current) {
+        mpegtsRef.current.destroy();
+        mpegtsRef.current = null;
+      }
+      if (abortRef.current) {
+        abortRef.current.abort();
+        abortRef.current = null;
       }
       video.removeAttribute("src");
       video.load();
@@ -230,17 +275,16 @@ export default function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
           onPause={() => setPlaying(false)}
           onEnded={() => setPlaying(false)}
           onError={(e) => {
-            const video = e.target as HTMLVideoElement;
-            const code = video.error?.code;
-            const msg = video.error?.message || "";
-            console.error("[VideoPlayer] Video error:", code, msg);
-            const errorMap: Record<number, string> = {
+            const el = e.target as HTMLVideoElement;
+            const code = el.error?.code;
+            console.error("[VideoPlayer] Video element error:", code, el.error?.message);
+            const map: Record<number, string> = {
               1: "Playback aborted.",
-              2: "A network error occurred while loading the stream.",
-              3: "The stream could not be decoded — format may be unsupported.",
-              4: "The stream is not supported by this browser.",
+              2: "Network error loading stream.",
+              3: "Stream could not be decoded.",
+              4: "Stream format not supported.",
             };
-            setPlaybackError((code != null ? errorMap[code] : null) || "Failed to play this channel. The stream may be offline or unreachable.");
+            setPlaybackError((code != null ? map[code] : null) || "Failed to play. Stream may be offline.");
           }}
         ></video>
 
