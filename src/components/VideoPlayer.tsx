@@ -18,6 +18,7 @@ export default function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
   const [fullscreen, setFullscreen] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [showVolume, setShowVolume] = useState(false);
+  const [playbackError, setPlaybackError] = useState("");
   const controlsTimeout = useRef<NodeJS.Timeout | null>(null);
 
   const showControls = useCallback(() => {
@@ -38,6 +39,8 @@ export default function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
       hlsRef.current = null;
     }
 
+    setPlaybackError("");
+
     if (video.canPlayType("application/vnd.apple.mpegurl")) {
       video.src = channel.url;
     } else {
@@ -54,6 +57,11 @@ export default function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
           hls.on(Hls.Events.MANIFEST_PARSED, () => {
             video.play().catch(() => {});
             setPlaying(true);
+          });
+          hls.on(Hls.Events.ERROR, (_event: any, data: any) => {
+            if (data.fatal) {
+              setPlaybackError("Failed to play this channel. The stream may be offline or unreachable.");
+            }
           });
         }
       });
@@ -169,9 +177,10 @@ export default function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
           className="w-full aspect-video bg-black cursor-pointer"
           onClick={togglePlay}
           playsInline
-          onPlay={() => setPlaying(true)}
+          onPlay={() => { setPlaying(true); setPlaybackError(""); }}
           onPause={() => setPlaying(false)}
           onEnded={() => setPlaying(false)}
+          onError={() => setPlaybackError("Failed to play this channel. The stream may be offline or unreachable.")}
         >
           <source src={channel.url} />
         </video>
@@ -212,7 +221,18 @@ export default function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
           </button>
         </div>
 
-        {!playing && (
+        {playbackError && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+            <div className="text-center px-6">
+              <svg className="w-12 h-12 text-red-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+              <p className="text-sm text-red-300">{playbackError}</p>
+            </div>
+          </div>
+        )}
+
+        {!playing && !playbackError && (
           <div className="absolute inset-0 flex items-center justify-center">
             <button
               onClick={togglePlay}

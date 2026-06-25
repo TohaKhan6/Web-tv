@@ -24,6 +24,7 @@ export default function Home() {
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [loading, setLoading] = useState(!!siteConfig.defaultPlaylistUrl);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     const stored = localStorage.getItem("iptv-favorites");
@@ -42,17 +43,19 @@ export default function Home() {
 
   const loadPlaylist = useCallback(async (url: string) => {
     setLoading(true);
+    setError("");
     const data = await fetchPlaylist(url);
     if (data && data.channels.length > 0) {
-      const merged = mergeChannels(data.channels, allChannels);
-      setAllChannels(merged);
+      setAllChannels((prev) => mergeChannels(data.channels, prev));
       setPlaylist({
-        channels: merged,
+        channels: data.channels,
         categories: data.categories,
       });
+    } else {
+      setError("Failed to load playlist. The URL may be invalid or the server may be blocking requests.");
     }
     setLoading(false);
-  }, [allChannels]);
+  }, []);
 
   const loadFilePlaylist = useCallback((file: File) => {
     setLoading(true);
@@ -156,6 +159,22 @@ export default function Home() {
             <div className="flex flex-col items-center gap-3">
               <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin" />
               <p className="text-sm text-text-secondary">Loading channels...</p>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {error && (
+        <section className="px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto mt-8">
+          <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
+            <div className="flex items-start gap-3">
+              <svg className="w-5 h-5 text-red-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div>
+                <p className="text-sm font-medium text-red-400">Error</p>
+                <p className="text-xs text-red-300/80 mt-1">{error}</p>
+              </div>
             </div>
           </div>
         </section>

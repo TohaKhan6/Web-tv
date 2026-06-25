@@ -7,7 +7,7 @@ export const siteConfig = {
   noticeText: "⚡ Welcome to Cloud IPTV. Join our Telegram Channel for updates, new playlists, and exclusive content.",
   noticeLink: "https://t.me/cloudiptv",
   noticeLinkText: "Join Now",
-  defaultPlaylistUrl: "",
+  defaultPlaylistUrl: "https://go.skym3u.top/k98v.m3u",
   accentColor: "#2563EB",
   hoverAccent: "#3B82F6",
   categories: [

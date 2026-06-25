@@ -55,8 +55,12 @@ export function parseM3U(content: string): PlaylistData {
 
 export async function fetchPlaylist(url: string): Promise<PlaylistData | null> {
   try {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error("Failed to fetch playlist");
+    const proxyUrl = `/api/playlist?url=${encodeURIComponent(url)}`;
+    const response = await fetch(proxyUrl);
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || "Failed to fetch playlist");
+    }
     const text = await response.text();
     return parseM3U(text);
   } catch {
