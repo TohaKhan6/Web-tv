@@ -45,34 +45,38 @@ export default function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
     const isHls = url.includes(".m3u8") || url.includes(".m3u");
     const isTs = url.includes(".ts");
 
-    if (isHls) {
+    const setupHls = (src: string) => {
+      import("hls.js").then((HlsModule) => {
+        const Hls = HlsModule.default;
+        if (Hls.isSupported()) {
+          const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+          hls.loadSource(src);
+          hls.attachMedia(video);
+          hlsRef.current = hls;
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            video.play().catch(() => {});
+            setPlaying(true);
+          });
+          hls.on(Hls.Events.ERROR, (_event: any, data: any) => {
+            if (data.fatal) {
+              setPlaybackError("Failed to play this channel. The stream may be offline or unreachable.");
+            }
+          });
+        } else {
+          video.src = url;
+          video.load();
+        }
+      });
+    };
+
+    if (isHls || isTs) {
       if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        video.src = url;
+        video.src = isTs ? `/api/manifest?url=${encodeURIComponent(url)}` : url;
         video.load();
         video.play().catch(() => {});
         setPlaying(true);
       } else {
-        import("hls.js").then((HlsModule) => {
-          const Hls = HlsModule.default;
-          if (Hls.isSupported()) {
-            const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
-            hls.loadSource(url);
-            hls.attachMedia(video);
-            hlsRef.current = hls;
-            hls.on(Hls.Events.MANIFEST_PARSED, () => {
-              video.play().catch(() => {});
-              setPlaying(true);
-            });
-            hls.on(Hls.Events.ERROR, (_event: any, data: any) => {
-              if (data.fatal) {
-                setPlaybackError("Failed to play this channel. The stream may be offline or unreachable.");
-              }
-            });
-          } else {
-            video.src = url;
-            video.load();
-          }
-        });
+        setupHls(isTs ? `/api/manifest?url=${encodeURIComponent(url)}` : url);
       }
     } else {
       video.src = url;
