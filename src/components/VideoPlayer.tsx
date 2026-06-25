@@ -164,9 +164,10 @@ export default function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
 
     const onWaiting = () => setBuffering(true);
     const onPlaying = () => { setBuffering(false); setPlaying(true); };
+    const onCanPlay = () => setBuffering(false);
     video.addEventListener("waiting", onWaiting);
     video.addEventListener("playing", onPlaying);
-    video.addEventListener("canplay", () => setBuffering(false));
+    video.addEventListener("canplay", onCanPlay);
 
     if (isM3u) {
       playWithHls(url);
@@ -181,9 +182,9 @@ export default function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
     return () => {
       video.removeEventListener("waiting", onWaiting);
       video.removeEventListener("playing", onPlaying);
-      video.removeEventListener("canplay", () => setBuffering(false));
-      if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
-      if (mpegtsRef.current) { mpegtsRef.current.destroy(); mpegtsRef.current = null; }
+      video.removeEventListener("canplay", onCanPlay);
+      if (hlsRef.current) { try { hlsRef.current.destroy(); } catch {} hlsRef.current = null; }
+      if (mpegtsRef.current) { try { mpegtsRef.current.destroy(); } catch {} mpegtsRef.current = null; }
       video.removeAttribute("src");
       video.load();
     };
