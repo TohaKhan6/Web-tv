@@ -76,7 +76,7 @@ export default function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
           lowLatencyMode: true,
           maxBufferLength: 10,
           maxMaxBufferLength: 30,
-          startLevel: -1,
+          startLevel: 0,
           abrEwmaDefaultEstimate: 500000,
           testBandwidth: true,
         });
@@ -132,8 +132,8 @@ export default function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
             url: proxySrc,
           }, {
             liveBufferLatencyChasing: true,
-            liveBufferLatencyMaxLatency: 3,
-            liveBufferLatencyMinRemain: 1,
+            liveBufferLatencyMaxLatency: 2,
+            liveBufferLatencyMinRemain: 0.5,
             autoCleanupSourceBuffer: true,
           });
           player.attachMediaElement(video);
