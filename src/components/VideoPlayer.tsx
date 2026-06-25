@@ -33,6 +33,7 @@ export default function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
     if (!channel || !videoRef.current) return;
 
     const video = videoRef.current;
+    const url = channel.url;
 
     if (hlsRef.current) {
       hlsRef.current.destroy();
@@ -41,30 +42,43 @@ export default function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
 
     setPlaybackError("");
 
-    if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      video.src = channel.url;
+    const isHls = url.includes(".m3u8") || url.includes(".m3u");
+    const isTs = url.includes(".ts");
+
+    if (isHls) {
+      if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = url;
+        video.load();
+        video.play().catch(() => {});
+        setPlaying(true);
+      } else {
+        import("hls.js").then((HlsModule) => {
+          const Hls = HlsModule.default;
+          if (Hls.isSupported()) {
+            const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+            hls.loadSource(url);
+            hls.attachMedia(video);
+            hlsRef.current = hls;
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+              video.play().catch(() => {});
+              setPlaying(true);
+            });
+            hls.on(Hls.Events.ERROR, (_event: any, data: any) => {
+              if (data.fatal) {
+                setPlaybackError("Failed to play this channel. The stream may be offline or unreachable.");
+              }
+            });
+          } else {
+            video.src = url;
+            video.load();
+          }
+        });
+      }
     } else {
-      import("hls.js").then((HlsModule) => {
-        const Hls = HlsModule.default;
-        if (Hls.isSupported()) {
-          const hls = new Hls({
-            enableWorker: true,
-            lowLatencyMode: true,
-          });
-          hls.loadSource(channel.url);
-          hls.attachMedia(video);
-          hlsRef.current = hls;
-          hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            video.play().catch(() => {});
-            setPlaying(true);
-          });
-          hls.on(Hls.Events.ERROR, (_event: any, data: any) => {
-            if (data.fatal) {
-              setPlaybackError("Failed to play this channel. The stream may be offline or unreachable.");
-            }
-          });
-        }
-      });
+      video.src = url;
+      video.load();
+      video.play().catch(() => {});
+      setPlaying(true);
     }
 
     setPlaying(false);
@@ -75,6 +89,8 @@ export default function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
+      video.removeAttribute("src");
+      video.load();
     };
   }, [channel?.id]);
 
@@ -181,9 +197,7 @@ export default function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
           onPause={() => setPlaying(false)}
           onEnded={() => setPlaying(false)}
           onError={() => setPlaybackError("Failed to play this channel. The stream may be offline or unreachable.")}
-        >
-          <source src={channel.url} />
-        </video>
+        ></video>
 
         <div
           className={`absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/30 transition-opacity duration-300 ${
