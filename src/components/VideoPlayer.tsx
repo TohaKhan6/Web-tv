@@ -41,51 +41,80 @@ export default function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
     }
 
     setPlaybackError("");
+    setPlaying(false);
 
-    const isHls = url.includes(".m3u8") || url.includes(".m3u");
-    const isTs = url.includes(".ts");
+    const isM3u = url.includes(".m3u8") || url.includes(".m3u");
+    const isTs = url.endsWith(".ts");
+
+    console.log("[VideoPlayer] Loading:", url.substring(0, 80), { isM3u, isTs });
 
     const setupHls = (src: string) => {
       import("hls.js").then((HlsModule) => {
         const Hls = HlsModule.default;
-        if (Hls.isSupported()) {
-          const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
-          hls.loadSource(src);
-          hls.attachMedia(video);
-          hlsRef.current = hls;
-          hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            video.play().catch(() => {});
-            setPlaying(true);
-          });
-          hls.on(Hls.Events.ERROR, (_event: any, data: any) => {
-            if (data.fatal) {
-              setPlaybackError("Failed to play this channel. The stream may be offline or unreachable.");
-            }
-          });
-        } else {
-          video.src = url;
+        if (!Hls.isSupported()) {
+          console.warn("[VideoPlayer] hls.js not supported, falling back to native");
+          video.src = src;
           video.load();
+          return;
         }
+        const hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+          maxBufferLength: 30,
+          maxMaxBufferLength: 60,
+        });
+        hls.loadSource(src);
+        hls.attachMedia(video);
+        hlsRef.current = hls;
+
+        hls.on(Hls.Events.MANIFEST_PARSED, (_e: any, data: any) => {
+          console.log("[VideoPlayer] Manifest parsed, levels:", data.levels?.length);
+          video.play().then(() => setPlaying(true)).catch((e: any) => {
+            console.warn("[VideoPlayer] Autoplay blocked:", e.message);
+            setPlaying(false);
+          });
+        });
+
+        hls.on(Hls.Events.ERROR, (_event: any, data: any) => {
+          console.error("[VideoPlayer] HLS error:", data.type, data.details, data.fatal);
+          if (data.fatal) {
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                setPlaybackError("Network error — the stream server may be offline or blocking requests.");
+                hls.startLoad();
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                setPlaybackError("Playback error — the stream format may be unsupported.");
+                hls.recoverMediaError();
+                break;
+              default:
+                setPlaybackError("Failed to play this channel. The stream may be offline or unreachable.");
+                hls.destroy();
+                break;
+            }
+          }
+        });
       });
     };
 
-    if (isHls || isTs) {
+    if (isM3u || isTs) {
+      const hlsSrc = isTs ? `/api/manifest?url=${encodeURIComponent(url)}` : url;
       if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        video.src = isTs ? `/api/manifest?url=${encodeURIComponent(url)}` : url;
+        console.log("[VideoPlayer] Using native HLS");
+        video.src = hlsSrc;
         video.load();
-        video.play().catch(() => {});
-        setPlaying(true);
+        video.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
       } else {
-        setupHls(isTs ? `/api/manifest?url=${encodeURIComponent(url)}` : url);
+        console.log("[VideoPlayer] Using hls.js");
+        setupHls(hlsSrc);
       }
     } else {
+      console.log("[VideoPlayer] Using native video");
       video.src = url;
       video.load();
-      video.play().catch(() => {});
-      setPlaying(true);
+      video.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
     }
 
-    setPlaying(false);
     showControls();
 
     return () => {
@@ -200,7 +229,19 @@ export default function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
           onPlay={() => { setPlaying(true); setPlaybackError(""); }}
           onPause={() => setPlaying(false)}
           onEnded={() => setPlaying(false)}
-          onError={() => setPlaybackError("Failed to play this channel. The stream may be offline or unreachable.")}
+          onError={(e) => {
+            const video = e.target as HTMLVideoElement;
+            const code = video.error?.code;
+            const msg = video.error?.message || "";
+            console.error("[VideoPlayer] Video error:", code, msg);
+            const errorMap: Record<number, string> = {
+              1: "Playback aborted.",
+              2: "A network error occurred while loading the stream.",
+              3: "The stream could not be decoded — format may be unsupported.",
+              4: "The stream is not supported by this browser.",
+            };
+            setPlaybackError((code != null ? errorMap[code] : null) || "Failed to play this channel. The stream may be offline or unreachable.");
+          }}
         ></video>
 
         <div
